@@ -1,31 +1,27 @@
-const jwt = require('jsonwebtoken');
+// src/middleware/authMiddleware.js
+
+const jwt = require("jsonwebtoken");
 
 const protect = (req, res, next) => {
-  let token;
+  const authHeader = req.headers.authorization;
 
-  // Verificar si viene el token en headers
-  if (
-    req.headers.authorization &&
-    req.headers.authorization.startsWith('Bearer')
-  ) {
-    try {
-      // Obtener token
-      token = req.headers.authorization.split(' ')[1];
-
-      // Verificar token
-      const decoded = jwt.verify(token, process.env.JWT_SECRET);
-
-      // Guardar info del usuario (id)
-      req.user = decoded.id;
-
-      next(); // continuar
-    } catch (error) {
-      return res.status(401).json({ message: 'Token no válido' });
-    }
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    return res.status(401).json({ message: "No autorizado, token faltante" });
   }
 
-  if (!token) {
-    return res.status(401).json({ message: 'No autorizado, token faltante' });
+  const token = authHeader.split(" ")[1];
+
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+
+    req.user = {
+      id: decoded.id,
+      role: decoded.role
+    };
+
+    next();
+  } catch (error) {
+    return res.status(401).json({ message: "Token no válido" });
   }
 };
 

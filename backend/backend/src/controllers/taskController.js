@@ -1,43 +1,73 @@
 // ---------------------------------------------
 // src/controllers/taskController.js
-// Controlador de tareas (CRUD)
-// Aquí SOLO va la lógica, NO rutas
+// PostgreSQL + Supabase + JWT + Paginación
 // ---------------------------------------------
 
-const Task = require('../models/Task');
+const pool = require('../config/db');
 
 // ===============================
-// OBTENER TODAS LAS TAREAS
+// OBTENER TAREAS CON PAGINACIÓN
 // ===============================
 const getTasks = async (req, res) => {
   try {
-    const tasks = await Task.find().sort({ createdAt: -1 });
-    res.json(tasks);
+    const userId = req.user.id;
+
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 5;
+    const offset = (page - 1) * limit;
+
+    // Total de tareas del usuario
+    const totalResult = await pool.query(
+      "SELECT COUNT(*) FROM tasks WHERE user_id = $1",
+      [userId]
+    );
+
+    // Obtener tareas paginadas
+    const tasksResult = await pool.query(
+      `SELECT * FROM tasks
+       WHERE user_id = $1
+       ORDER BY created_at DESC
+       LIMIT $2 OFFSET $3`,
+      [userId, limit, offset]
+    );
+
+    res.status(200).json({
+      page,
+      limit,
+      total: parseInt(totalResult.rows[0].count),
+      data: tasksResult.rows
+    });
+
   } catch (error) {
-    res.status(500).json({ message: 'Error al obtener tareas' });
+    console.error(error);
+    res.status(500).json({ message: "Error al obtener tareas" });
   }
 };
 
 // ===============================
-// CREAR UNA NUEVA TAREA
+// CREAR TAREA
 // ===============================
 const createTask = async (req, res) => {
   try {
-    const { title, description } = req.body;
+    const userId = req.user.id;
+    const { title, description, status, priority } = req.body;
 
-    // Validación básica (suma puntos en rúbrica)
     if (!title) {
-      return res.status(400).json({ message: 'El título es obligatorio' });
+      return res.status(400).json({ message: "El título es obligatorio" });
     }
 
-    const task = await Task.create({
-      title,
-      description
-    });
+    const result = await pool.query(
+      `INSERT INTO tasks (title, description, status, priority, user_id)
+       VALUES ($1, $2, $3, $4, $5)
+       RETURNING *`,
+      [title, description || "", status || "pending", priority || "medium", userId]
+    );
 
-    res.status(201).json(task);
+    res.status(201).json(result.rows[0]);
+
   } catch (error) {
-    res.status(500).json({ message: 'Error al crear tarea' });
+    console.error(error);
+    res.status(500).json({ message: "Error al crear tarea" });
   }
 };
 
@@ -46,15 +76,30 @@ const createTask = async (req, res) => {
 // ===============================
 const updateTask = async (req, res) => {
   try {
-    const task = await Task.findByIdAndUpdate(
-      req.params.id,
-      req.body,
-      { new: true }
+    const userId = req.user.id;
+    const taskId = req.params.id;
+    const { title, description, status, priority } = req.body;
+
+    const result = await pool.query(
+      `UPDATE tasks
+       SET title = $1,
+           description = $2,
+           status = $3,
+           priority = $4
+       WHERE id = $5 AND user_id = $6
+       RETURNING *`,
+      [title, description, status, priority, taskId, userId]
     );
 
-    res.json(task);
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: "Tarea no encontrada" });
+    }
+
+    res.status(200).json(result.rows[0]);
+
   } catch (error) {
-    res.status(500).json({ message: 'Error al actualizar tarea' });
+    console.error(error);
+    res.status(500).json({ message: "Error al actualizar tarea" });
   }
 };
 
@@ -63,10 +108,23 @@ const updateTask = async (req, res) => {
 // ===============================
 const deleteTask = async (req, res) => {
   try {
-    await Task.findByIdAndDelete(req.params.id);
-    res.json({ message: 'Tarea eliminada correctamente' });
+    const userId = req.user.id;
+    const taskId = req.params.id;
+
+    const result = await pool.query(
+      "DELETE FROM tasks WHERE id = $1 AND user_id = $2 RETURNING *",
+      [taskId, userId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: "Tarea no encontrada" });
+    }
+
+    res.status(200).json({ message: "Tarea eliminada correctamente" });
+
   } catch (error) {
-    res.status(500).json({ message: 'Error al eliminar tarea' });
+    console.error(error);
+    res.status(500).json({ message: "Error al eliminar tarea" });
   }
 };
 

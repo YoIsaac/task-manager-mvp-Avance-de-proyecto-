@@ -1,9 +1,9 @@
 // src/controllers/authController.js
-// Controlador de autenticación (Register & Login)
+// Controlador de autenticación (Register & Login) - PostgreSQL + JWT
 
-const User = require('../models/User');
-const bcrypt = require('bcryptjs');
-const jwt = require('jsonwebtoken');
+const pool = require("../config/db");
+const bcrypt = require("bcrypt");
+const jwt = require("jsonwebtoken");
 
 /**
  * @desc    Registrar usuario
@@ -12,36 +12,40 @@ const jwt = require('jsonwebtoken');
  */
 const registerUser = async (req, res) => {
   try {
-    const { name, email, password } = req.body;
+    const { name, email, password, role } = req.body;
 
     // Validaciones básicas
     if (!name || !email || !password) {
-      return res.status(400).json({ message: 'Todos los campos son obligatorios' });
+      return res.status(400).json({ message: "Todos los campos son obligatorios" });
     }
 
     // Verificar si el usuario ya existe
-    const userExists = await User.findOne({ email });
-    if (userExists) {
-      return res.status(400).json({ message: 'El usuario ya existe' });
+    const existingUser = await pool.query(
+      "SELECT id FROM users WHERE email = $1",
+      [email]
+    );
+    if (existingUser.rows.length > 0) {
+      return res.status(400).json({ message: "El usuario ya existe" });
     }
 
     // Encriptar contraseña
-    const salt = await bcrypt.genSalt(10);
-    const hashedPassword = await bcrypt.hash(password, salt);
+    const hashedPassword = await bcrypt.hash(password, 10);
 
     // Crear usuario
-    const user = await User.create({
-      name,
-      email,
-      password: hashedPassword
-    });
+    const result = await pool.query(
+      `INSERT INTO users (name, email, password, role)
+       VALUES ($1, $2, $3, $4)
+       RETURNING id, name, email, role`,
+      [name, email, hashedPassword, role || "user"]
+    );
 
     res.status(201).json({
-      message: 'Usuario registrado correctamente',
-      userId: user._id
+      message: "Usuario registrado correctamente",
+      user: result.rows[0]
     });
   } catch (error) {
-    res.status(500).json({ message: 'Error al registrar usuario', error });
+    console.error(error);
+    res.status(500).json({ message: "Error al registrar usuario" });
   }
 };
 
@@ -55,30 +59,37 @@ const loginUser = async (req, res) => {
     const { email, password } = req.body;
 
     // Buscar usuario
-    const user = await User.findOne({ email });
-    if (!user) {
-      return res.status(400).json({ message: 'Credenciales inválidas' });
+    const result = await pool.query(
+      "SELECT * FROM users WHERE email = $1",
+      [email]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(401).json({ message: "Credenciales inválidas" });
     }
+
+    const user = result.rows[0];
 
     // Comparar contraseña
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) {
-      return res.status(400).json({ message: 'Credenciales inválidas' });
+      return res.status(401).json({ message: "Credenciales inválidas" });
     }
 
     // Crear token JWT
     const token = jwt.sign(
-      { id: user._id },
+      { id: user.id, role: user.role },
       process.env.JWT_SECRET,
-      { expiresIn: '1d' }
+      { expiresIn: "1d" } // token válido por 1 día
     );
 
     res.json({
-      message: 'Login exitoso',
+      message: "Login exitoso",
       token
     });
   } catch (error) {
-    res.status(500).json({ message: 'Error al iniciar sesión', error });
+    console.error(error);
+    res.status(500).json({ message: "Error al iniciar sesión" });
   }
 };
 
